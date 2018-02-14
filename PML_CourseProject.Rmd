@@ -1,0 +1,167 @@
+---
+title: "Practical Machine Learning Course Project"
+output: 
+  html_document: 
+    fig_caption: yes
+    keep_md: yes
+date: "February 12, 2018"
+---
+
+```{r setup, include=FALSE}
+      knitr::opts_chunk$set(echo = TRUE)
+      knitr::opts_chunk$set(fig.path = "figure/")
+```
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+### Data
+
+The training data for this project are available here:  https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+### Goal
+
+The goal of the project is to predict the manner in which the partcipants did the exercise. The predictor the "classe" variable in the training set. Create a report describing how the model is built, how cross validation is used, what is beleived is the expected out of the sample error.Use the prediction model to predict 20 different test cases.
+
+### Load required libraries for this project 
+
+```{r libraries}
+library(rattle)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+library(RColorBrewer)
+
+```
+
+
+### Read and load data for processing
+Data was previously downloaded to a subdirectory "Data" within "r" working directory
+
+```{r load_data}
+trainData <- read.csv("./Data/pml-training.csv")
+testData <- read.csv("./Data/pml-testing.csv")
+testing <- testData
+str(trainData)
+```
+
+### Exploratory Data Analysis and Data Cleaning 
+The training dataset contains 159 predictors and a dependent variable "classe". By reviewing the 
+output of str(trainData) we can see that the data contains columns that have "NAs", empty cells(""),
+and "#DIV/0!" . 
+
+```{r data_prep}
+# Columns 1-7 are row numbers,time stamps,new_window,and num_window and are 
+# unnecessay for this analysis
+training <- trainData[,-c(1:7)]
+
+# Remove columns with more than 95% NAs
+training <- training[, -which(colMeans(is.na(training)) > 0.95)]
+
+# Function to add a "0" level to factor columns. Will be required to 
+# be able to normalize the empty cells and cells that contains "#DIV/0" 
+# with a value of "0"
+addZeroLevel <- function(x){
+      if(is.factor(x)) return(factor(x, levels=c(levels(x), "0")))
+      return(x)
+}
+# Add a "0" level to factor columns using addZeroLevel function created prior
+training <- as.data.frame(lapply(training, addZeroLevel))
+
+# Replace all "#DIV/0"" with "0"; 
+training[training=="#DIV/0!"] <- "0"
+
+# Replace all empty cells with "0"; 
+training[training==""] <- "0"
+
+# remove columns where over 95% of the values are "0"
+training <- training[, -which(colMeans(training=="0") > 0.95)]
+
+# drop unused levels
+training <- droplevels(training)
+
+```
+
+### Split training data into two components 
+a) training - used to create the model
+b) validation - used to validate the  model
+
+```{r data}
+set.seed(256) 
+inTrain <- createDataPartition(y = training$classe, p = 0.75, list = FALSE)
+training <- training[inTrain, ]
+validation <- training[-inTrain, ]
+```
+
+### Create a model using decision trees on the training dataset. 
+Use the  model to predict "classe" in the validation dataset and use the confusion matrix to compare the predicted versus the actual labels:
+
+```{r model_tree}
+
+modTree <- rpart(classe ~ ., data = training, method = "class")
+fancyRpartPlot(modTree)
+
+predTree <- predict(modTree, validation, type = "class")
+
+# Use confusion matrix to get estimate of out-of-sample error. Get the accuracy 
+# of the prediction 
+confusionMatrix(validation$classe, predTree)
+```
+
+### Decision Tree accuracy and out of sample error
+
+```{r model_tree_accuracy_error}
+accuracy <-postResample(predTree, validation$classe)
+print(paste("Accuracy %", accuracy[1]*100, sep=": "))
+print(paste("Error %", (1-accuracy[1])*100, sep=": "))
+```
+
+### Create a model Using random forest on the training dataset. 
+Use the model to predict "classe" in the validation dataset and use the confusion matrix to compare the predicted versus the actual labels:
+
+```{r model_random_forest}
+modelRF <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+modelRF
+predRF <- predict(modelRF, validation)
+
+# Use confusion matrix to get estimate of out-of-sample error
+confusionMatrix(validation$classe, predRF)
+```
+
+### Random Forest accuracy and out of sample error
+  
+```{r model_Random_Forest_accuracy_error}
+accuracy <-postResample(predRF, validation$classe)
+print(paste("Accuracy %", accuracy[1]*100, sep=": "))
+print(paste("Error %", (1-accuracy[1])*100, sep=": "))
+```
+
+### Predicting the "classe" variable in the test data
+The accuracy of the random forest model is 100%. Use this model to predict the "classe"
+variable in the test dataset.
+
+```{r report}
+#predicTest <- predict(modelRF, testing[, -length(names(testing))])
+predicTest <- predict(modelRF, testing)
+predicTest
+
+pml_write_files = function(x){
+      n = length(x)
+      for(i in 1:n){
+            filename = paste0("problem_id_",i,".txt")
+            write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+      }
+}
+
+# create prediction files to submit
+pml_write_files(predicTest)
+
+```
